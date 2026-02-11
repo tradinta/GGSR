@@ -7,10 +7,35 @@ const initializeFirebaseAdmin = () => {
     }
 
     try {
-        const serviceAccount = require("./firebase-service-account.json");
-        return admin.initializeApp({
-            credential: admin.credential.cert(serviceAccount),
-        });
+        let serviceAccount;
+
+        // Prioritize Environment Variable (Production)
+        if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+            try {
+                serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+            } catch (e) {
+                console.error("Failed to parse FIREBASE_SERVICE_ACCOUNT environment variable");
+            }
+        }
+
+        // Fallback to local file (Development)
+        if (!serviceAccount) {
+            try {
+                serviceAccount = require("./firebase-service-account.json");
+            } catch (e) {
+                console.warn("Local firebase-service-account.json not found.");
+            }
+        }
+
+        if (serviceAccount) {
+            return admin.initializeApp({
+                credential: admin.credential.cert(serviceAccount),
+            });
+        } else {
+            console.error("Firebase Admin could not be initialized: No credentials found.");
+            return null;
+        }
+
     } catch (error) {
         console.error("Firebase Admin initialization error:", error);
         return null;
