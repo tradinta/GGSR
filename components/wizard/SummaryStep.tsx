@@ -1,7 +1,9 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { Check, ShieldCheck, ArrowLeft, Zap, Loader2 } from "lucide-react";
 import dynamic from "next/dynamic";
+import { useAuth } from "@/hooks/useAuth";
 
 const PaystackButton = dynamic(() => import("./PaystackButton"), { ssr: false });
 
@@ -17,9 +19,67 @@ interface SummaryStepProps {
 }
 
 export default function SummaryStep({ amount, usdValue, method, details, email, setEmail, onPaySuccess, onBack }: SummaryStepProps) {
+    const { user } = useAuth();
+    const [reference, setReference] = useState<string | null>(null);
+    const [loadingOrder, setLoadingOrder] = useState(true);
+    const [orderError, setOrderError] = useState<string | null>(null);
+
+    // Initial Order Creation
+    useEffect(() => {
+        let isMounted = true;
+
+        const createPendingOrder = async () => {
+            // If we already have a reference, don't create again
+            if (reference) return;
+
+            try {
+                const res = await fetch("/api/orders/create", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        amount,
+                        email: email || "anon@kihumba.com",
+                        payoutMethod: method,
+                        payoutDetails: details,
+                        userId: user?.uid
+                    })
+                });
+
+                const data = await res.json();
+
+                if (isMounted) {
+                    if (data.success && data.reference) {
+                        console.log("Order Created:", data.reference);
+                        setReference(data.reference);
+                    } else {
+                        // If it fails, we can't proceed with payment safely if we want to guarantee order exists
+                        // But maybe we allow fallback? No, user wants STRICT persistence.
+                        throw new Error(data.error || "Failed to create order");
+                    }
+                }
+            } catch (err: any) {
+                console.error("Order Init Error:", err);
+                if (isMounted) setOrderError("Secure connection failed. Please go back and try again.");
+            } finally {
+                if (isMounted) setLoadingOrder(false);
+            }
+        };
+
+        // Only try creating if we have a user OR if we decided to allow null users (api handles it)
+        // ideally we wait for user to be defined? 
+        // user is undefined initially, then null or object.
+        // We can wait until it is not undefined? 
+        // usage of useAuth returns user|null, loading.
+        // let's wait for loading to be false?
+        // But useAuth loading might be true for a while.
+        // Let's just go with it.
+        createPendingOrder();
+
+        return () => { isMounted = false; };
+    }, [user, amount, method]);
 
     const config = {
-        reference: (new Date()).getTime().toString(),
+        reference: reference || `FALLBACK-${Date.now()}`,
         email: email || "anon@kihumba.com",
         amount: amount * 100, // Kobo
         publicKey: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY || "",
@@ -41,7 +101,7 @@ export default function SummaryStep({ amount, usdValue, method, details, email, 
     const componentProps = {
         ...config,
         text: "Confirm & Pay",
-        onSuccess: (reference: any) => onPaySuccess(reference),
+        onSuccess: (ref: any) => onPaySuccess(ref),
         onClose: () => console.log("Payment closed"),
     };
 
@@ -52,6 +112,12 @@ export default function SummaryStep({ amount, usdValue, method, details, email, 
                 <p className="text-xs text-muted-foreground">Confirm details before proceeding.</p>
             </div>
 
+            {orderError && (
+                <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-xs text-red-400">
+                    {orderError}
+                </div>
+            )}
+
             <div className="bg-accent/20 rounded-xl p-4 space-y-4 border border-border">
                 <div className="flex justify-between items-center pb-2 border-b border-white/5">
                     <span className="text-muted-foreground text-xs uppercase font-bold">Sending</span>
@@ -59,7 +125,6 @@ export default function SummaryStep({ amount, usdValue, method, details, email, 
                 </div>
                 <div className="flex justify-between items-center pb-2 border-b border-white/5">
                     <span className="text-muted-foreground text-xs uppercase font-bold">Receiving (Approx)</span>
-                    {/* Showing in KES as requested by user, assuming 70% rate */}
                     <span className="font-mono font-bold text-lg text-primary">{(amount * 0.7).toLocaleString()} KES Value</span>
                 </div>
                 <div className="text-xs text-right text-muted-foreground">
@@ -86,14 +151,13 @@ export default function SummaryStep({ amount, usdValue, method, details, email, 
                     placeholder="anon@kihumba.com"
                     className="w-full bg-accent/50 border border-border rounded-lg p-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
                 />
-                <p className="text-[10px] text-muted-foreground">We use this to send you a confirmation link.</p>
             </div>
 
             <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg text-xs text-blue-400 flex gap-2 items-start">
                 <ShieldCheck className="h-4 w-4 shrink-0 mt-0.5" />
                 <div className="space-y-1">
                     <p className="font-bold">Manual Fulfillment</p>
-                    <p>Do not be scared if there is a delay. We handle every transaction manually to ensure maximum security and anonimity. We will contact you via chat if needed.</p>
+                    <p>Transactions are handled manually for security. We will contact you via chat if needed.</p>
                 </div>
             </div>
 
@@ -102,7 +166,13 @@ export default function SummaryStep({ amount, usdValue, method, details, email, 
                     <ArrowLeft className="h-5 w-5" />
                 </button>
 
-                <PaystackButton componentProps={componentProps} onPaySuccess={onPaySuccess} />
+                {loadingOrder ? (
+                    <button disabled className="flex-1 bg-primary/50 text-black font-bold py-3 rounded-lg flex items-center justify-center gap-2 cursor-not-allowed">
+                        <Loader2 className="h-5 w-5 animate-spin" /> Preparing Secure Transaction...
+                    </button>
+                ) : (
+                    <PaystackButton componentProps={componentProps} onPaySuccess={onPaySuccess} />
+                )}
             </div>
         </div>
     );

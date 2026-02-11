@@ -26,19 +26,38 @@ export async function POST(req: Request) {
             });
         }
 
-        // Create Order in DB
-        const order = await prisma.order.create({
-            data: {
-                paystackRef: reference,
-                amountKES: amount,
-                amountUSDT: amount * 0.7 / 130, // Approx calculation again or pass from client
-                email: email,
-                payoutMethod: payoutMethod,
-                payoutDetails: JSON.stringify(payoutDetails),
-                status: "PAID", // Inline success usually means paid
-                userId: userId // Link to anonymous user
-            },
+        // Check if Order already exists (from immediate persistence)
+        const existingOrder = await prisma.order.findFirst({
+            where: { paystackRef: reference }
         });
+
+        let order;
+
+        if (existingOrder) {
+            console.log(`[API] Updating existing order ${existingOrder.id} to PAID`);
+            order = await prisma.order.update({
+                where: { id: existingOrder.id },
+                data: {
+                    status: "PAID",
+                    paystackRef: reference, // Ensure ref is set (redundant but safe)
+                    userId: userId, // Ensure User is linked
+                }
+            });
+        } else {
+            console.log(`[API] Creating NEW order (Fallback for ${reference})`);
+            order = await prisma.order.create({
+                data: {
+                    paystackRef: reference,
+                    amountKES: amount,
+                    amountUSDT: amount * 0.7 / 130,
+                    email: email,
+                    payoutMethod: payoutMethod,
+                    payoutDetails: JSON.stringify(payoutDetails),
+                    status: "PAID",
+                    userId: userId
+                },
+            });
+        }
 
         return NextResponse.json({ success: true, order });
     } catch (error) {
