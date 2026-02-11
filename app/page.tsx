@@ -1,163 +1,211 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { calculateUSDT, validateAmount } from "@/lib/rate";
-import { Copy, Wallet, ArrowRight, ShieldCheck, Zap } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { calculatePayout, validateAmount } from "@/lib/rate";
+import { useAuth } from "@/hooks/useAuth";
+import { useAnalytics } from "@/hooks/useAnalytics";
+import ChatWidget from "@/components/ChatWidget";
+import UserProfile from "@/components/UserProfile";
+import dynamic from "next/dynamic";
+import AmountStep from "@/components/wizard/AmountStep";
+import MethodStep from "@/components/wizard/MethodStep";
+import DetailsStep from "@/components/wizard/DetailsStep";
+
+const SummaryStep = dynamic(() => import("@/components/wizard/SummaryStep"), { ssr: false });
+
+import SuccessStep from "@/components/wizard/SuccessStep";
+
+import { ShieldCheck, Copy, User } from "lucide-react";
+import { toast } from "sonner";
 
 export default function Home() {
+  const { user, login, loading: authLoading } = useAuth();
+  useAnalytics(); // Initialize tracking
+
+  // Wizard State
+  const [step, setStep] = useState(1);
   const [kesAmount, setKesAmount] = useState<string>("");
-  const [usdtAmount, setUsdtAmount] = useState<number>(0);
-  const [walletAddress, setWalletAddress] = useState("");
+  const [usdValue, setUsdValue] = useState<number>(0);
+  const [method, setMethod] = useState("CRYPTO");
+  const [details, setDetails] = useState<any>({});
   const [email, setEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [orderData, setOrderData] = useState<any>(null);
 
+  // UX State
+  const [loading, setLoading] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
+  const [hasNotifiedAuth, setHasNotifiedAuth] = useState(false);
+
+  // Auto-Login & Notification
+  useEffect(() => {
+    if (!user && !authLoading) {
+      login();
+    }
+  }, [user, authLoading]);
+
+  useEffect(() => {
+    if (user && !hasNotifiedAuth) {
+      toast.success("Anonymous Identity Created", {
+        description: "Click to view your secret credentials.",
+        action: {
+          label: "View Identity",
+          onClick: () => setShowProfile(true)
+        },
+        duration: 8000
+      });
+      setHasNotifiedAuth(true);
+    }
+  }, [user, hasNotifiedAuth]);
+
+  // Rate Calculation
   useEffect(() => {
     const amount = parseFloat(kesAmount);
     if (!isNaN(amount)) {
-      setUsdtAmount(calculateUSDT(amount));
+      setUsdValue(calculatePayout(amount));
       setError(validateAmount(amount));
     } else {
-      setUsdtAmount(0);
+      setUsdValue(0);
       setError(null);
     }
   }, [kesAmount]);
 
-  const handlePayment = async () => {
-    if (error || !kesAmount || !walletAddress || !email) return;
+  const handleNext = () => {
+    if (step === 1 && (error || !kesAmount)) return;
+    setStep(prev => prev + 1);
+  };
 
+  const handleBack = () => setStep(prev => prev - 1);
+
+  const handlePaystackSuccess = async (reference: any) => {
     setLoading(true);
     try {
-      const response = await fetch("/api/paystack", {
+      const response = await fetch("/api/paystack/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          reference: reference.reference,
           amount: parseFloat(kesAmount),
-          email,
-          walletAddress,
-        }),
+          email: email || `user_${user?.uid?.slice(0, 6)}@kihumba.com`,
+          payoutMethod: method,
+          payoutDetails: details,
+          userId: user?.uid
+        })
       });
 
-      const data = await response.json();
-      if (data.authorization_url) {
-        window.location.href = data.authorization_url;
+      if (response.ok) {
+        const data = await response.json();
+        setOrderData(data.order);
+        setStep(5); // Move to Success Step
+        toast.success("Transaction Initiated!");
       } else {
-        alert("Payment initialization failed");
+        toast.error("Failed to record transaction. Please contact support.");
       }
+
     } catch (err) {
       console.error(err);
-      alert("An error occurred");
+      toast.error("An error occurred recording your transaction.");
     } finally {
       setLoading(false);
     }
   };
 
+
   return (
-    <main className="min-h-screen bg-background text-foreground flex flex-col items-center justify-center p-4">
+    <main className="min-h-screen bg-background text-foreground flex flex-col items-center justify-center p-4 relative overflow-hidden">
       <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center [mask-image:linear-gradient(180deg,white,rgba(255,255,255,0))]" />
 
-      <div className="z-10 w-full max-w-md space-y-8">
+      {/* Top Bar for Profile Access */}
+      <div className="absolute top-4 right-4 z-20">
+        <button
+          onClick={() => setShowProfile(true)}
+          className="flex items-center gap-2 bg-accent/30 hover:bg-accent/50 border border-border rounded-full px-4 py-2 transition-all backdrop-blur-sm"
+        >
+          <div className="bg-primary/20 p-1 rounded-full">
+            <User className="h-4 w-4 text-primary" />
+          </div>
+          <span className="text-xs font-bold hidden sm:inline">My Identity</span>
+        </button>
+      </div>
+
+      <UserProfile isOpen={showProfile} onClose={() => setShowProfile(false)} />
+
+      <div className="z-10 w-full max-w-md space-y-8 relative">
         <div className="text-center space-y-2">
           <h1 className="text-4xl font-bold tracking-tighter sm:text-5xl text-transparent bg-clip-text bg-gradient-to-r from-primary to-secondary">
             GhostSwap
           </h1>
           <p className="text-muted-foreground">
-            Anonymous. Fast. Secure.
+            Anonymize your money. Any method.
           </p>
         </div>
 
-        <div className="bg-card border border-border rounded-xl p-6 shadow-2xl backdrop-blur-sm">
-          <div className="space-y-4">
-            {/* KES Input */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-muted-foreground">You Send (KES)</label>
-              <div className="relative">
-                <input
-                  type="number"
-                  value={kesAmount}
-                  onChange={(e) => setKesAmount(e.target.value)}
-                  placeholder="0"
-                  className="w-full bg-accent/50 border border-border rounded-lg p-3 text-lg focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
-                />
-                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground font-bold">KES</span>
-              </div>
-              {error && <p className="text-red-500 text-xs">{error}</p>}
-            </div>
-
-            <div className="flex justify-center">
-              <ArrowRight className="text-muted-foreground rotate-90 md:rotate-90" />
-            </div>
-
-            {/* USDT Output */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-muted-foreground">You Receive (USDT)</label>
-              <div className="relative">
-                <input
-                  type="text"
-                  value={usdtAmount}
-                  readOnly
-                  className="w-full bg-accent/50 border border-border rounded-lg p-3 text-lg text-primary font-bold focus:outline-none"
-                />
-                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground font-bold">USDT</span>
-              </div>
-              <p className="text-xs text-muted-foreground text-right">Rate: 70% Value</p>
-            </div>
-
-            {/* Wallet Address */}
-            <div className="space-y-2 pt-4">
-              <label className="text-sm font-medium text-muted-foreground">USDT Wallet Address (TRC20)</label>
-              <div className="relative">
-                <Wallet className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground h-4 w-4" />
-                <input
-                  type="text"
-                  value={walletAddress}
-                  onChange={(e) => setWalletAddress(e.target.value)}
-                  placeholder="T..."
-                  className="w-full bg-accent/50 border border-border rounded-lg p-3 pl-10 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
-                />
-              </div>
-            </div>
-
-            {/* Email */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-muted-foreground">Email (For Receipt)</label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="anon@example.com"
-                className="w-full bg-accent/50 border border-border rounded-lg p-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
-              />
-            </div>
-
-            <button
-              onClick={handlePayment}
-              disabled={loading || !!error || !kesAmount || !walletAddress || !email}
-              className="w-full bg-primary hover:bg-primary/90 text-black font-bold py-4 rounded-lg transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? (
-                "Processing..."
-              ) : (
-                <>
-                  <Zap className="h-5 w-5" /> Buy USDT Now
-                </>
-              )}
-            </button>
-          </div>
+        <div className="bg-card border border-border rounded-xl p-6 shadow-2xl backdrop-blur-sm min-h-[400px]">
+          {step === 1 && (
+            <AmountStep
+              amount={kesAmount}
+              setAmount={setKesAmount}
+              usdValue={usdValue}
+              error={error}
+              onNext={handleNext}
+            />
+          )}
+          {step === 2 && (
+            <MethodStep
+              selectedMethod={method}
+              setSelectedMethod={setMethod}
+              onNext={handleNext}
+              onBack={handleBack}
+            />
+          )}
+          {step === 3 && (
+            <DetailsStep
+              method={method}
+              details={details}
+              setDetails={setDetails}
+              onNext={handleNext}
+              onBack={handleBack}
+            />
+          )}
+          {step === 4 && (
+            <SummaryStep
+              amount={parseFloat(kesAmount)}
+              usdValue={usdValue}
+              method={method}
+              details={details}
+              email={email}
+              setEmail={setEmail}
+              onPaySuccess={handlePaystackSuccess}
+              onBack={handleBack}
+            />
+          )}
+          {step === 5 && orderData && (
+            <SuccessStep
+              amount={parseFloat(kesAmount)}
+              method={method}
+              orderId={orderData.id}
+              onReset={() => {
+                setStep(1);
+                setKesAmount("");
+                setOrderData(null);
+              }}
+            />
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-4 text-center text-xs text-muted-foreground">
           <div className="flex flex-col items-center gap-2">
             <ShieldCheck className="h-6 w-6 text-primary" />
-            <span>No KYC Required</span>
+            <span>Encrypted Data</span>
           </div>
           <div className="flex flex-col items-center gap-2">
             <Copy className="h-6 w-6 text-secondary" />
-            <span>Instant Processing</span>
+            <span>Manual Fulfillment</span>
           </div>
         </div>
       </div>
+
+      <ChatWidget />
     </main>
   );
 }

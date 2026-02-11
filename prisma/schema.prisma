@@ -1,0 +1,63 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite" // Will switch to "postgresql" for Render
+  url      = "file:./dev.db"
+}
+
+model User {
+  id        String   @id // Firebase UID
+  email     String   @unique // The generated email (or real email for admin)
+  role      String   @default("USER") // USER, ADMIN
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  orders    Order[]
+  analytics AnalyticsEvent[]
+  
+  // Analytics Profile
+  ipHash        String?
+  userAgent     String?
+  country       String?
+  visitCount    Int      @default(1)
+  lastActive    DateTime @default(now())
+}
+
+model Order {
+  id            String   @id @default(uuid())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  // Payment Details
+  email         String
+  amountKES     Float
+  amountUSDT    Float    // The calculated value based on rate
+  paystackRef   String?  // Reference from Paystack
+  status        String   @default("PENDING") // PENDING, PAID, COMPLETED, FAILED
+
+  // Payout Details
+  payoutMethod  String   // CRYPTO, MOBILE, BANK, CASH
+  payoutDetails String   // JSON string containing specific details
+
+  // Relations
+  userId        String?
+  User          User?    @relation(fields: [userId], references: [id])
+}
+
+model AnalyticsEvent {
+  id        String   @id @default(uuid())
+  userId    String?  // Optional because we might track pre-login events (though we auto-login)
+  User      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  
+  eventType String   // e.g., "PAGE_VIEW", "WIZARD_STEP", "CLICK"
+  eventName String   // e.g., "details_step", "confirm_payment"
+  metadata  String?  // JSON string for extra details
+  timestamp DateTime @default(now())
+
+  // Session Context
+  ipHash    String?
+  userAgent String?
+  path      String?
+}

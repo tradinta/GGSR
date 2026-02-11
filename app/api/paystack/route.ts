@@ -3,7 +3,7 @@ import { validateAmount } from "@/lib/rate";
 
 export async function POST(req: Request) {
     try {
-        const { amount, email, walletAddress } = await req.json();
+        const { amount, email, payoutMethod, payoutDetails } = await req.json();
 
         // 1. Validate Amount
         const error = validateAmount(amount);
@@ -11,8 +11,8 @@ export async function POST(req: Request) {
             return NextResponse.json({ error }, { status: 400 });
         }
 
-        if (!email || !walletAddress) {
-            return NextResponse.json({ error: "Missing email or wallet address" }, { status: 400 });
+        if (!email || !payoutMethod) {
+            return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
         }
 
         // 2. Initialize Paystack Transaction
@@ -27,17 +27,23 @@ export async function POST(req: Request) {
                 amount: amount * 100, // Paystack expects amount in Kobo (cents)
                 currency: "KES",
                 metadata: {
-                    wallet_address: walletAddress,
+                    payout_method: payoutMethod,
+                    payout_details: payoutDetails, // Store JSON details in metadata
                     custom_fields: [
                         {
-                            display_name: "Wallet Address",
-                            variable_name: "wallet_address",
-                            value: walletAddress,
+                            display_name: "Payout Method",
+                            variable_name: "payout_method",
+                            value: payoutMethod,
                         },
+                        ...Object.entries(payoutDetails).map(([key, value]) => ({
+                            display_name: key,
+                            variable_name: key,
+                            value: String(value),
+                        })),
                     ],
                 },
                 callback_url: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/verify`, // Redirect after payment
-            }),
+            }, null, 2),
         });
 
         const paystackData = await paystackResponse.json();
@@ -46,7 +52,8 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: paystackData.message }, { status: 400 });
         }
 
-        // TODO: Create Order in Database (Prisma) once Prisma is set up
+        // Note: Order creation in DB should ideally happen via Webhook to confirm payment,
+        // or here as "PENDING". For simplicity in this step, we rely on metadata persistence.
 
         return NextResponse.json({ authorization_url: paystackData.data.authorization_url });
     } catch (error) {
