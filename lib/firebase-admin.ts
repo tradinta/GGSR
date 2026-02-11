@@ -18,14 +18,8 @@ const initializeFirebaseAdmin = () => {
             }
         }
 
-        // Fallback to local file (Development)
-        if (!serviceAccount) {
-            try {
-                serviceAccount = require("./firebase-service-account.json");
-            } catch (e) {
-                console.warn("Local firebase-service-account.json not found.");
-            }
-        }
+        // Fallback to local file (Development) - REMOVED for production cleanliness
+        // if (!serviceAccount) ...
 
         if (serviceAccount) {
             return admin.initializeApp({

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import prisma from "@/lib/prisma";
+import { getAdminDb } from "@/lib/firebase-admin";
 import crypto from "crypto";
 
 export async function POST(req: Request) {
@@ -28,20 +28,40 @@ export async function POST(req: Request) {
             // In a real app, store the quote at initialization time to lock the rate
             // For now, we recalculate or trust the metadata if we added it there
 
-            // Upsert Order
+            // Upsert Order in Firestore
             // We use paystack reference as unique ID if possible, or create new
-            await prisma.order.create({
-                data: {
+            const db = getAdminDb();
+            const snapshot = await db.collection("orders").where("paystackRef", "==", data.reference).limit(1).get();
+
+            let orderId;
+            if (!snapshot.empty) {
+                // Update existing
+                const doc = snapshot.docs[0];
+                await doc.ref.set({
+                    status: "PAID",
+                    amountKES,// We trust the webhook data
+                    metadata: data.metadata || {},
+                    updatedAt: new Date()
+                }, { merge: true });
+                orderId = doc.id;
+                console.log("Order updated via webhook:", orderId);
+            } else {
+                // Create new
+                const res = await db.collection("orders").add({
                     email,
                     amountKES,
-                    amountUSDT: amountKES * 0.7 * (1 / 130), // Approx recalc, ideally pass in metadata
+                    amountUSDT: amountKES * 0.7 * (1 / 130),
                     paystackRef: data.reference,
                     status: "PAID",
                     payoutMethod,
                     payoutDetails,
-                },
-            });
-            console.log("Order created for", email);
+                    createdAt: new Date(),
+                    updatedAt: new Date(),
+                    userId: null // Webhook might not know the userId unless in metadata
+                });
+                orderId = res.id;
+                console.log("Order created via webhook:", orderId);
+            }
         }
 
         return NextResponse.json({ status: "success" });
