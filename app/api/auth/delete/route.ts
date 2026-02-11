@@ -1,7 +1,6 @@
 // @ts-nocheck
 import { NextResponse } from "next/server";
-import prisma from "@/lib/prisma";
-import { getAdminAuth } from "@/lib/firebase-admin";
+import { getAdminAuth, getAdminDb } from "@/lib/firebase-admin";
 
 export async function POST(req: Request) {
     try {
@@ -16,15 +15,29 @@ export async function POST(req: Request) {
             const adminAuth = getAdminAuth();
             await adminAuth.deleteUser(uid);
         } catch (firebaseError: any) {
-            // If user doesn't exist in Firebase, we can still proceed to clean up DB
             console.warn("Firebase User already deleted or not found:", firebaseError.message);
         }
 
-        // 2. Delete related data in DB
-        // We explicitly delete to ensure child records are removed before the parent User record
-        await prisma.analyticsEvent.deleteMany({ where: { userId: uid } });
-        await prisma.order.deleteMany({ where: { userId: uid } });
-        await prisma.user.delete({ where: { id: uid } });
+        // 2. Delete related data in Firestore
+        const db = getAdminDb();
+
+        // Delete User Doc
+        await db.collection("users").doc(uid).delete();
+
+        // Delete related orders (batch delete recommended for large sets, simplified here)
+        const ordersSnapshot = await db.collection("orders").where("userId", "==", uid).get();
+        const batch = db.batch();
+        ordersSnapshot.docs.forEach((doc) => {
+            batch.delete(doc.ref);
+        });
+
+        // Delete analytics
+        const analyticsSnapshot = await db.collection("analytics").where("userId", "==", uid).get();
+        analyticsSnapshot.docs.forEach((doc) => {
+            batch.delete(doc.ref);
+        });
+
+        await batch.commit();
 
         return NextResponse.json({ success: true });
     } catch (error: any) {

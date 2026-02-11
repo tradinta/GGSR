@@ -1,21 +1,23 @@
 // @ts-nocheck
 import { NextResponse } from "next/server";
-import prisma from "@/lib/prisma";
+import { getAdminDb } from "@/lib/firebase-admin";
 
 export async function POST(req: Request) {
     try {
         const { userId, eventType, eventName, metadata, userAgent } = await req.json();
 
-        if (!userId) return NextResponse.json({ error: "No User ID" }, { status: 400 });
+        // Loose tracking, if no user ID we might still want to track? 
+        // Prisma schema allowed nullable userId.
 
-        await prisma.analyticsEvent.create({
-            data: {
-                userId,
-                eventType,
-                eventName,
-                metadata: metadata ? JSON.stringify(metadata) : null,
-                userAgent: userAgent || null,
-            },
+        const db = getAdminDb();
+
+        await db.collection("analytics").add({
+            userId: userId || null,
+            eventType,
+            eventName,
+            metadata: metadata ? JSON.stringify(metadata) : null,
+            userAgent: userAgent || null,
+            timestamp: new Date()
         });
 
         return NextResponse.json({ success: true });

@@ -1,15 +1,14 @@
 import { NextResponse } from "next/server";
-import prisma from "@/lib/prisma";
+import { getAdminDb } from "@/lib/firebase-admin";
 
 export async function POST(req: Request) {
     try {
         const { uid } = await req.json();
 
-        const user = await prisma.user.findUnique({
-            where: { id: uid },
-        });
+        const db = getAdminDb();
+        const doc = await db.collection("users").doc(uid).get();
 
-        if (user && user.role === "ADMIN") {
+        if (doc.exists && doc.data()?.role === "ADMIN") {
             return NextResponse.json({ isAdmin: true });
         }
 
