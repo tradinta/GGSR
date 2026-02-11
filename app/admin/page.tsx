@@ -1,15 +1,28 @@
-import prisma from "@/lib/prisma";
+import { getAdminDb } from "@/lib/firebase-admin";
 import { CheckCircle, XCircle, Clock, Search } from "lucide-react";
 
 // In a real app, use authentication (e.g., NextAuth)
-// For this demo, we'll just render it protected by layout or middleware (middleware not implemented yet)
+// For this demo, we'll just render it protected by layout or middleware
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminPage() {
-    const orders = await prisma.order.findMany({
-        orderBy: { createdAt: "desc" },
-    });
+    const db = getAdminDb();
+    const snapshot = await db.collection("orders").orderBy("createdAt", "desc").get();
+
+    const orders = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        // Convert Timestamp to Date for rendering
+        createdAt: doc.data().createdAt?.toDate() || new Date(),
+        updatedAt: doc.data().updatedAt?.toDate() || new Date(),
+        amountKES: Number(doc.data().amountKES || 0),
+        amountUSDT: Number(doc.data().amountUSDT || 0),
+        email: doc.data().email || "Unknown",
+        status: doc.data().status || "PENDING",
+        payoutMethod: doc.data().payoutMethod || "UNKNOWN",
+        payoutDetails: doc.data().payoutDetails || "{}"
+    }));
 
     return (
         <div className="space-y-6">
@@ -94,8 +107,8 @@ export default async function AdminPage() {
                                 </td>
                                 <td className="p-4">
                                     <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase flex w-fit items-center gap-1 ${order.status === "PAID" ? "bg-yellow-900/50 text-yellow-400 border border-yellow-500/30" :
-                                            order.status === "COMPLETED" ? "bg-green-900/50 text-green-400 border border-green-500/30" :
-                                                "bg-red-900/50 text-red-400 border border-red-500/30"
+                                        order.status === "COMPLETED" ? "bg-green-900/50 text-green-400 border border-green-500/30" :
+                                            "bg-red-900/50 text-red-400 border border-red-500/30"
                                         }`}>
                                         {order.status === "PAID" && <Clock className="h-3 w-3" />}
                                         {order.status === "COMPLETED" && <CheckCircle className="h-3 w-3" />}
