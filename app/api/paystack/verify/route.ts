@@ -9,6 +9,23 @@ export async function POST(req: Request) {
         // Verify logic would go here (call Paystack API to confirm status)
         // For now we assume success if client says so (Verification should be rigorous in prod)
 
+        // Ensure User Exists (Fix for Foreign Key Error)
+        // If the sync endpoint failed or hasn't run, we must create the user here.
+        if (userId) {
+            await prisma.user.upsert({
+                where: { id: userId },
+                update: {}, // No update needed if exists
+                create: {
+                    id: userId,
+                    email: email || `user_${userId.slice(0, 6)}@kihumba.com`,
+                    role: "USER",
+                    createdAt: new Date(),
+                    lastActive: new Date(),
+                    visitCount: 1
+                }
+            });
+        }
+
         // Create Order in DB
         const order = await prisma.order.create({
             data: {
